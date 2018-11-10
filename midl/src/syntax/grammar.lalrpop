@@ -1,6 +1,14 @@
-use crate::syntax::ast::{span, Quote, Type, Comment, Annotations, Annotation, AnnotationKind};
+use crate::syntax::ast::{span, Quote, Type, Comment, Annotations, Annotation, AnnotationKind, FnDecl, Argument};
 
 grammar;
+
+pub FnDecl: FnDecl = {
+    <l:@L> <ret:Type> <name:identifier> "(" <args:Comma<Argument>> ")" <r:@R> => FnDecl::new(name, ret, args, span(l, r)),
+};
+
+Argument: Argument = {
+    <l:@L> <ann:Annotations?> <ty:Type> <name:identifier> <r:@R> => Argument {name, ty, annotations: ann, span: span(l, r) },
+};
 
 pub Annotations: Annotations = {
     <l:@L> "[" <an:Comma<Annotation>> "]" <r:@R> => Annotations::new(an, span(l, r)),
@@ -13,6 +21,8 @@ Annotation: Annotation = {
 AnnotationKind: AnnotationKind = {
     "object" => AnnotationKind::Object,
     "local" => AnnotationKind::Local,
+    "in" => AnnotationKind::In,
+    "out" => AnnotationKind::Out,
     <id:identifier> => AnnotationKind::Word(id),
     <id:identifier> "(" <nested:Annotation> ")" => AnnotationKind::Nested(id, Box::new(nested)), 
 };
@@ -26,9 +36,11 @@ pub Comment: Comment = {
 };
 
 pub Type: Type = {
-    "unsigned" <inner:Type> => Type::Unsigned(Box::new(inner)),
+    "unsigned" "long" => Type::UnsignedLong,
     "long" => Type::Long,
-    <identifier> => Type::Other(<>),
+    "void" => Type::Void,
+    <ty:Type> "*" => Type::Ptr { inner: Box::new(ty), is_const: false },
+    <identifier> => Type::Named(<>),
 };
 
 string_literal: String = {

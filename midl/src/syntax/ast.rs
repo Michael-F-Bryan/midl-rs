@@ -52,8 +52,11 @@ impl Quote {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Long,
-    Unsigned(Box<Type>),
-    Other(String),
+    UnsignedLong,
+    Void,
+    ConstPtr(Box<Type>),
+    Ptr { inner: Box<Type>, is_const: bool },
+    Named(String),
 }
 
 macro_rules! impl_ast_node {
@@ -101,14 +104,45 @@ impl Annotation {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AnnotationKind {
     Local,
+    In,
+    Out,
     Object,
     Uuid,
     Nested(String, Box<Annotation>),
     Word(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnDecl {
+    pub name: String,
+    pub return_ty: Type,
+    pub arguments: Vec<Argument>,
+    pub span: ByteSpan,
+}
+
+impl FnDecl {
+    pub fn new(name: String, return_ty: Type, arguments: Vec<Argument>, span: ByteSpan) -> FnDecl {
+        FnDecl {
+            name,
+            return_ty,
+            arguments,
+            span,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Argument {
+    pub name: String,
+    pub ty: Type,
+    pub annotations: Option<Annotations>,
+    pub span: ByteSpan,
+}
+
 impl_ast_node!(Annotation);
 impl_ast_node!(Annotations);
+impl_ast_node!(Argument);
+impl_ast_node!(FnDecl);
 impl_ast_node!(Comment);
 impl_ast_node!(Quote);
 impl_ast_node!(Item; Comment | Quote);
@@ -116,7 +150,7 @@ impl_ast_node!(Item; Comment | Quote);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::grammar::{AnnotationsParser, CommentParser, QuoteParser, TypeParser};
+    use crate::syntax::grammar::*;
 
     const IUNKNOWN: &str = r#"
 [
@@ -147,9 +181,16 @@ interface IUnknown
     #[test]
     fn builtin_types() {
         let inputs = vec![
-            ("unsigned long", Type::Unsigned(Box::new(Type::Long))),
+            ("unsigned long", Type::UnsignedLong),
             ("long", Type::Long),
-            ("HRESULT", Type::Other("HRESULT".to_string())),
+            (
+                "void *",
+                Type::Ptr {
+                    inner: Box::new(Type::Void),
+                    is_const: false,
+                },
+            ),
+            ("HRESULT", Type::Named("HRESULT".to_string())),
         ];
 
         for (src, should_be) in inputs {
@@ -173,6 +214,16 @@ interface IUnknown
     fn annotations() {
         let inputs = vec![
             ("[]", Annotations::new(vec![], span(0, 2))),
+            (
+                "[in]",
+                Annotations {
+                    span: span(0, 4),
+                    inner: vec![Annotation {
+                        span: span(1, 3),
+                        kind: AnnotationKind::In,
+                    }],
+                },
+            ),
             (
                 "[object]",
                 Annotations {
@@ -225,5 +276,81 @@ interface IUnknown
             let got = AnnotationsParser::new().parse(src).unwrap();
             assert_eq!(got, should_be);
         }
+    }
+
+    #[test]
+    fn basic_function_signature() {
+        let src = "ULONG Release()";
+        let should_be = FnDecl::new(
+            "Release".to_string(),
+            Type::Named("ULONG".to_string()),
+            vec![],
+            span(0, src.len()),
+        );
+
+        let got = FnDeclParser::new().parse(src).unwrap();
+
+        assert_eq!(got, should_be);
+    }
+
+    #[test]
+    fn function_with_arguments() {
+        let src = r#"ULONG Release([in] GUID * riid, [out, iid_is(riid)] void **ppvObject)"#;
+        let should_be = FnDecl {
+            name: "Release".to_string(),
+            return_ty: Type::Named("ULONG".to_string()),
+            arguments: vec![
+                Argument {
+                    name: "riid".to_string(),
+                    ty: Type::Ptr {
+                        inner: Box::new(Type::Named("GUID".to_string())),
+                        is_const: false,
+                    },
+                    annotations: Some(Annotations {
+                        inner: vec![Annotation {
+                            kind: AnnotationKind::In,
+                            span: span(15, 17),
+                        }],
+                        span: span(14, 18),
+                    }),
+                    span: span(14, 30),
+                },
+                Argument {
+                    name: "ppvObject".to_string(),
+                    ty: Type::Ptr {
+                        inner: Box::new(Type::Ptr {
+                            inner: Box::new(Type::Void),
+                            is_const: false,
+                        }),
+                        is_const: false,
+                    },
+                    annotations: Some(Annotations {
+                        inner: vec![
+                            Annotation {
+                                kind: AnnotationKind::Out,
+                                span: span(33, 36),
+                            },
+                            Annotation {
+                                kind: AnnotationKind::Nested(
+                                    "iid_is".to_string(),
+                                    Box::new(Annotation {
+                                        kind: AnnotationKind::Word("riid".to_string()),
+                                        span: span(45, 49),
+                                    }),
+                                ),
+                                span: span(38, 50),
+                            },
+                        ],
+                        span: span(32, 51),
+                    }),
+                    span: span(32, 68),
+                },
+            ],
+            span: span(0, src.len()),
+        };
+
+        let got = FnDeclParser::new().parse(src).unwrap();
+
+        assert_eq!(got, should_be);
     }
 }
