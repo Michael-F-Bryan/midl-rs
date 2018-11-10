@@ -1,0 +1,2 @@
+[workspace]
+members = ["midl", "com_apis", "com_apis_generator"]
