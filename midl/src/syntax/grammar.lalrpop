@@ -1,6 +1,21 @@
-use crate::syntax::ast::{span, Quote, Type, Comment};
+use crate::syntax::ast::{span, Quote, Type, Comment, Annotations, Annotation, AnnotationKind};
 
 grammar;
+
+pub Annotations: Annotations = {
+    <l:@L> "[" <an:Comma<Annotation>> "]" <r:@R> => Annotations::new(an, span(l, r)),
+};
+
+Annotation: Annotation = {
+    <l:@L> <ann:AnnotationKind> <r:@R> => Annotation::new(ann, span(l, r)),
+};
+
+AnnotationKind: AnnotationKind = {
+    "object" => AnnotationKind::Object,
+    "local" => AnnotationKind::Local,
+    <id:identifier> => AnnotationKind::Word(id),
+    <id:identifier> "(" <nested:Annotation> ")" => AnnotationKind::Nested(id, Box::new(nested)), 
+};
 
 pub Quote: Quote = {
     <l:@L> "cpp_quote" "(" <s:string_literal> ")" <r:@R> => Quote::new(s, span(l, r))
@@ -11,11 +26,26 @@ pub Comment: Comment = {
 };
 
 pub Type: Type = {
-    "unsigned" "long" => Type::UnsignedLong,
+    "unsigned" <inner:Type> => Type::Unsigned(Box::new(inner)),
     "long" => Type::Long,
-    r"[\w_][\w\d_]*" => Type::Other(<>.to_string()),
+    <identifier> => Type::Other(<>),
 };
 
 string_literal: String = {
     <s:r#""(?:[^"\\]|\\.)*""#> => s[1..s.len()-1].to_string()
+};
+
+identifier: String = {
+    <s:r"[\w_][\w\d_]*"> => s.to_string(),
+};
+
+Comma<T>: Vec<T> = {
+    <v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            let mut v = v;
+            v.push(e);
+            v
+        }
+    }
 };

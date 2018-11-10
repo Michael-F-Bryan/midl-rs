@@ -52,7 +52,7 @@ impl Quote {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Long,
-    UnsignedLong,
+    Unsigned(Box<Type>),
     Other(String),
 }
 
@@ -74,14 +74,65 @@ macro_rules! impl_ast_node {
     }
 }
 
-impl_ast_node!(Quote);
+#[derive(Debug, Clone, PartialEq)]
+pub struct Annotations {
+    pub inner: Vec<Annotation>,
+    pub span: ByteSpan,
+}
+
+impl Annotations {
+    pub fn new(inner: Vec<Annotation>, span: ByteSpan) -> Annotations {
+        Annotations { inner, span }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Annotation {
+    pub kind: AnnotationKind,
+    pub span: ByteSpan,
+}
+
+impl Annotation {
+    pub fn new(kind: AnnotationKind, span: ByteSpan) -> Annotation {
+        Annotation { kind, span }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnnotationKind {
+    Local,
+    Object,
+    Uuid,
+    Nested(String, Box<Annotation>),
+    Word(String),
+}
+
+impl_ast_node!(Annotation);
+impl_ast_node!(Annotations);
 impl_ast_node!(Comment);
-impl_ast_node!(Item; Quote);
+impl_ast_node!(Quote);
+impl_ast_node!(Item; Comment | Quote);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::grammar::{CommentParser, QuoteParser, TypeParser};
+    use crate::syntax::grammar::{AnnotationsParser, CommentParser, QuoteParser, TypeParser};
+
+    const IUNKNOWN: &str = r#"
+[
+    local,
+    object,
+    uuid(00000000-0000-0000-C000-000000000046),
+
+    pointer_default(unique)
+]
+interface IUnknown
+{
+    HRESULT QueryInterface([in] const GUID * riid, [out, iid_is(riid), annotation("__RPC__deref_out")] void **ppvObject);
+    ULONG AddRef();
+    ULONG Release();
+};
+    "#;
 
     #[test]
     fn parse_cpp_quote() {
@@ -96,7 +147,7 @@ mod tests {
     #[test]
     fn builtin_types() {
         let inputs = vec![
-            ("unsigned long", Type::UnsignedLong),
+            ("unsigned long", Type::Unsigned(Box::new(Type::Long))),
             ("long", Type::Long),
             ("HRESULT", Type::Other("HRESULT".to_string())),
         ];
@@ -116,5 +167,63 @@ mod tests {
 
         let got = CommentParser::new().parse(src).unwrap();
         assert_eq!(got, should_be);
+    }
+
+    #[test]
+    fn annotations() {
+        let inputs = vec![
+            ("[]", Annotations::new(vec![], span(0, 2))),
+            (
+                "[object]",
+                Annotations {
+                    span: span(0, 8),
+                    inner: vec![Annotation {
+                        span: span(1, 7),
+                        kind: AnnotationKind::Object,
+                    }],
+                },
+            ),
+            (
+                "[local]",
+                Annotations {
+                    span: span(0, 7),
+                    inner: vec![Annotation {
+                        span: span(1, 6),
+                        kind: AnnotationKind::Local,
+                    }],
+                },
+            ),
+            (
+                "[local, object]",
+                Annotations {
+                    span: span(0, 15),
+                    inner: vec![
+                        Annotation {
+                            span: span(1, 6),
+                            kind: AnnotationKind::Local,
+                        },
+                        Annotation {
+                            span: span(8, 14),
+                            kind: AnnotationKind::Object,
+                        },
+                    ],
+                },
+            ),
+            (
+                "[something_else]",
+                Annotations {
+                    span: span(0, 16),
+                    inner: vec![Annotation {
+                        span: span(1, 15),
+                        kind: AnnotationKind::Word("something_else".to_string()),
+                    }],
+                },
+            ),
+        ];
+
+        for (src, should_be) in inputs {
+            let got = AnnotationsParser::new().parse(src).unwrap();
+            assert_eq!(got, should_be);
+        }
     }
 }
