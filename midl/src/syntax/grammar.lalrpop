@@ -1,0 +1,11 @@
+use crate::syntax::ast::{span, Quote};
+
+grammar;
+
+pub Quote: Quote = {
+    <l:@L> "cpp_quote" "(" <s:string_literal> ")" <r:@R> => Quote::new(s, span(l, r))
+}
+
+string_literal: String = {
+    <s:r#""(?:[^"\\]|\\.)*""#> => s[1..s.len()-1].to_string()
+};
