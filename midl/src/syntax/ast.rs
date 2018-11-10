@@ -1,10 +1,15 @@
 use codespan::{ByteIndex, ByteSpan};
+use failure_derive::Fail;
+use regex::Regex;
 use std::any::TypeId;
+use std::fmt::{self, Display, Formatter};
+use std::str::FromStr;
 
 pub(crate) fn span(l: usize, r: usize) -> ByteSpan {
     ByteSpan::new(ByteIndex(l as u32), ByteIndex(r as u32))
 }
 
+/// A trait implemented by all AST nodes.
 pub trait AstNode: 'static {
     fn span(&self) -> ByteSpan;
 
@@ -15,6 +20,7 @@ pub trait AstNode: 'static {
 }
 
 sum_type::sum_type! {
+    /// A top-level item.
     #[derive(Debug, Clone, PartialEq)]
     pub enum Item {
         Quote,
@@ -22,6 +28,7 @@ sum_type::sum_type! {
     }
 }
 
+/// A comment.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Comment {
     pub content: String,
@@ -77,6 +84,7 @@ macro_rules! impl_ast_node {
     }
 }
 
+/// A set of zero or more [`Annotation`]s.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Annotations {
     pub inner: Vec<Annotation>,
@@ -89,6 +97,7 @@ impl Annotations {
     }
 }
 
+/// A single annotation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Annotation {
     pub kind: AnnotationKind,
@@ -101,17 +110,78 @@ impl Annotation {
     }
 }
 
+/// The actual type of annotation this is.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AnnotationKind {
     Local,
     In,
     Out,
     Object,
-    Uuid,
+    Uuid(Guid),
     Nested(String, Box<Annotation>),
     Word(String),
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Guid {
+    pub data1: u32,
+    pub data2: u16,
+    pub data3: u16,
+    pub data4: [u8; 8],
+}
+
+impl FromStr for Guid {
+    type Err = ParseGuidError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        lazy_static::lazy_static! {
+            static ref PATTERN: Regex = Regex::new(r"^([[:xdigit:]]{8})-([[:xdigit:]]{4})-([[:xdigit:]]{4})-([[:xdigit:]]{4})-([[:xdigit:]]{12})$").unwrap();
+        }
+
+        let got = PATTERN.captures(s).ok_or(ParseGuidError)?;
+
+        let first_u16 = u16::from_str_radix(&got[4], 16).unwrap();
+        let data4 = &got[5];
+        let data4 = [
+            (first_u16 >> 8) as u8,
+            (first_u16 & 0xFF) as u8,
+            u8::from_str_radix(&data4[0..2], 16).unwrap(),
+            u8::from_str_radix(&data4[2..4], 16).unwrap(),
+            u8::from_str_radix(&data4[4..6], 16).unwrap(),
+            u8::from_str_radix(&data4[6..8], 16).unwrap(),
+            u8::from_str_radix(&data4[8..10], 16).unwrap(),
+            u8::from_str_radix(&data4[10..12], 16).unwrap(),
+        ];
+
+        Ok(Guid {
+            data1: u32::from_str_radix(&got[1], 16).unwrap(),
+            data2: u16::from_str_radix(&got[2], 16).unwrap(),
+            data3: u16::from_str_radix(&got[3], 16).unwrap(),
+            data4,
+        })
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Fail)]
+#[fail(display = "Invalid GUID format")]
+pub struct ParseGuidError;
+
+impl Display for Guid {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{:08X}-{:04X}-{:04X}-{:02X}{:02X}-",
+            self.data1, self.data2, self.data3, self.data4[0], self.data4[1],
+        )?;
+        for byte in &self.data4[2..] {
+            write!(f, "{:02X}", byte)?;
+        }
+
+        Ok(())
+    }
+}
+
+/// A bare function signature.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnDecl {
     pub name: String,
@@ -131,6 +201,7 @@ impl FnDecl {
     }
 }
 
+/// A function argument.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Argument {
     pub name: String,
@@ -231,6 +302,18 @@ interface IUnknown
                     inner: vec![Annotation {
                         span: span(1, 7),
                         kind: AnnotationKind::Object,
+                    }],
+                },
+            ),
+            (
+                "[uuid(00000000-0000-0000-C000-000000000046)]",
+                Annotations {
+                    span: span(0, 44),
+                    inner: vec![Annotation {
+                        span: span(1, 43),
+                        kind: AnnotationKind::Uuid(
+                            "00000000-0000-0000-C000-000000000046".parse().unwrap(),
+                        ),
                     }],
                 },
             ),
@@ -350,6 +433,36 @@ interface IUnknown
         };
 
         let got = FnDeclParser::new().parse(src).unwrap();
+
+        assert_eq!(got, should_be);
+    }
+
+    #[test]
+    fn print_guid() {
+        let guid = Guid {
+            data1: 0,
+            data2: 0,
+            data3: 0x0000,
+            data4: [0xC0, 0, 0, 0, 0, 0, 0, 0x46],
+        };
+        let should_be = "00000000-0000-0000-C000-000000000046";
+
+        let got = guid.to_string();
+
+        assert_eq!(got, should_be);
+    }
+
+    #[test]
+    fn parse_a_guid() {
+        let should_be = Guid {
+            data1: 0,
+            data2: 0,
+            data3: 0x0000,
+            data4: [0xC0, 0, 0, 0, 0, 0, 0, 0x46],
+        };
+        let src = "00000000-0000-0000-C000-000000000046";
+
+        let got = Guid::from_str(src).unwrap();
 
         assert_eq!(got, should_be);
     }

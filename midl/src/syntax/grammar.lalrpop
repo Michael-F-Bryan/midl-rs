@@ -23,6 +23,7 @@ AnnotationKind: AnnotationKind = {
     "local" => AnnotationKind::Local,
     "in" => AnnotationKind::In,
     "out" => AnnotationKind::Out,
+    "uuid" "(" <guid:r"[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}"> ")" => AnnotationKind::Uuid(guid.parse().unwrap()),
     <id:identifier> => AnnotationKind::Word(id),
     <id:identifier> "(" <nested:Annotation> ")" => AnnotationKind::Nested(id, Box::new(nested)), 
 };
