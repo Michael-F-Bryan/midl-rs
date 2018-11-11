@@ -15,3 +15,5 @@ The project contains several crates:
   Rust equivalent of the `midl.exe` compiler supplied with Windows
 - `com_apis`: a generated crate which exposes bindings for most of the COM 
   interfaces available as part of the Windows SDK
+
+[MIDL]: https://docs.microsoft.com/en-us/windows/desktop/midl/midl-start-page

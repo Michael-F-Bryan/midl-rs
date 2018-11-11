@@ -1,6 +1,7 @@
 use super::Guid;
 use codespan::{ByteIndex, ByteSpan};
 use std::any::TypeId;
+use std::fmt::{self, Display, Formatter};
 use std::iter::{FromIterator, IntoIterator};
 
 pub(crate) fn span(l: usize, r: usize) -> ByteSpan {
@@ -54,28 +55,54 @@ impl Quote {
     }
 }
 
+impl Display for Quote {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "cpp_quote({:?})", self.content)
+    }
+}
+
 /// A type name.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
+    Short,
     Long,
-    UnsignedLong,
+    Int,
+    Char,
+    Unsigned(Box<Type>),
     Void,
-    ConstPtr(Box<Type>),
     Ptr { inner: Box<Type>, is_const: bool },
     Named(String),
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match *self {
+            Type::Short => write!(f, "short"),
+            Type::Long => write!(f, "long"),
+            Type::Int => write!(f, "int"),
+            Type::Char => write!(f, "char"),
+            Type::Unsigned(ref inner) => write!(f, "unsigned {}", inner),
+            Type::Void => write!(f, "void"),
+            Type::Ptr {
+                ref inner,
+                is_const,
+            } => {
+                if is_const {
+                    write!(f, "const {} *", inner)
+                } else {
+                    write!(f, "{} *", inner)
+                }
+            }
+            Type::Named(ref name) => write!(f, "{}", name),
+        }
+    }
 }
 
 /// A set of zero or more [`Annotation`]s.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Annotations {
-    pub inner: Vec<Annotation>,
+    pub items: Vec<Annotation>,
     pub span: ByteSpan,
-}
-
-impl Annotations {
-    pub fn new(inner: Vec<Annotation>, span: ByteSpan) -> Annotations {
-        Annotations { inner, span }
-    }
 }
 
 impl IntoIterator for Annotations {
@@ -83,7 +110,7 @@ impl IntoIterator for Annotations {
     type IntoIter = <Vec<Annotation> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.inner.into_iter()
+        self.items.into_iter()
     }
 }
 
@@ -92,7 +119,7 @@ impl<'a> IntoIterator for &'a Annotations {
     type IntoIter = <&'a [Annotation] as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.inner.iter()
+        self.items.iter()
     }
 }
 
@@ -110,7 +137,7 @@ impl FromIterator<Annotation> for Annotations {
             items.push(item);
         }
 
-        Annotations::new(items, span)
+        Annotations { items, span }
     }
 }
 
@@ -129,7 +156,22 @@ impl FromIterator<Annotations> for Annotations {
             .flatten()
             .collect();
 
-        Annotations::new(items, span)
+        Annotations { items, span }
+    }
+}
+
+impl Display for Annotations {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "[")?;
+
+        if self.items.len() > 1 {
+            self.items[0].fmt(f)?;
+        }
+
+        for item in self.items.iter().skip(1) {
+            write!(f, " {}", item)?;
+        }
+        write!(f, "]")
     }
 }
 
@@ -146,6 +188,12 @@ impl Annotation {
     }
 }
 
+impl Display for Annotation {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        self.kind.fmt(f)
+    }
+}
+
 /// The actual type of annotation this is.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AnnotationKind {
@@ -157,6 +205,21 @@ pub enum AnnotationKind {
     Nested(String, Box<Annotation>),
     Word(String),
     StringLiteral(String),
+}
+
+impl Display for AnnotationKind {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match *self {
+            AnnotationKind::Local => write!(f, "local"),
+            AnnotationKind::In => write!(f, "in"),
+            AnnotationKind::Out => write!(f, "out"),
+            AnnotationKind::Object => write!(f, "object"),
+            AnnotationKind::Uuid(ref guid) => guid.fmt(f),
+            AnnotationKind::Nested(ref name, ref inner) => write!(f, "{}({})", name, inner),
+            AnnotationKind::Word(ref word) => word.fmt(f),
+            AnnotationKind::StringLiteral(ref lit) => write!(f, "\"{}\"", lit),
+        }
+    }
 }
 
 /// A bare function signature.
@@ -179,6 +242,22 @@ impl FnDecl {
     }
 }
 
+impl Display for FnDecl {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{} {}(", self.return_ty, self.name)?;
+
+        if self.arguments.len() > 1 {
+            write!(f, "{}", self.arguments[0])?;
+        }
+
+        for arg in self.arguments.iter().skip(1) {
+            write!(f, ", {}", arg)?;
+        }
+
+        write!(f, ")")
+    }
+}
+
 /// A function argument.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Argument {
@@ -186,6 +265,16 @@ pub struct Argument {
     pub ty: Type,
     pub annotations: Option<Annotations>,
     pub span: ByteSpan,
+}
+
+impl Display for Argument {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        if let Some(ref annotations) = self.annotations {
+            write!(f, "{} ", annotations)?;
+        }
+
+        write!(f, "{} {}", self.ty, self.name)
+    }
 }
 
 /// A COM interface.
@@ -259,7 +348,7 @@ interface IUnknown
     #[test]
     fn builtin_types() {
         let inputs = vec![
-            ("unsigned long", Type::UnsignedLong),
+            ("unsigned long", Type::Unsigned(Box::new(Type::Long))),
             ("long", Type::Long),
             (
                 "void *",
@@ -291,12 +380,18 @@ interface IUnknown
     #[test]
     fn annotations() {
         let inputs = vec![
-            ("[]", Annotations::new(vec![], span(0, 2))),
+            (
+                "[]",
+                Annotations {
+                    items: vec![],
+                    span: span(0, 2),
+                },
+            ),
             (
                 "[in]",
                 Annotations {
                     span: span(0, 4),
-                    inner: vec![Annotation {
+                    items: vec![Annotation {
                         span: span(1, 3),
                         kind: AnnotationKind::In,
                     }],
@@ -306,7 +401,7 @@ interface IUnknown
                 "[object]",
                 Annotations {
                     span: span(0, 8),
-                    inner: vec![Annotation {
+                    items: vec![Annotation {
                         span: span(1, 7),
                         kind: AnnotationKind::Object,
                     }],
@@ -316,7 +411,7 @@ interface IUnknown
                 "[uuid(00000000-0000-0000-C000-000000000046)]",
                 Annotations {
                     span: span(0, 44),
-                    inner: vec![Annotation {
+                    items: vec![Annotation {
                         span: span(1, 43),
                         kind: AnnotationKind::Uuid(
                             "00000000-0000-0000-C000-000000000046".parse().unwrap(),
@@ -328,7 +423,7 @@ interface IUnknown
                 "[local]",
                 Annotations {
                     span: span(0, 7),
-                    inner: vec![Annotation {
+                    items: vec![Annotation {
                         span: span(1, 6),
                         kind: AnnotationKind::Local,
                     }],
@@ -338,7 +433,7 @@ interface IUnknown
                 "[local, object]",
                 Annotations {
                     span: span(0, 15),
-                    inner: vec![
+                    items: vec![
                         Annotation {
                             span: span(1, 6),
                             kind: AnnotationKind::Local,
@@ -354,7 +449,7 @@ interface IUnknown
                 "[something_else]",
                 Annotations {
                     span: span(0, 16),
-                    inner: vec![Annotation {
+                    items: vec![Annotation {
                         span: span(1, 15),
                         kind: AnnotationKind::Word("something_else".to_string()),
                     }],
@@ -397,7 +492,7 @@ interface IUnknown
                         is_const: false,
                     },
                     annotations: Some(Annotations {
-                        inner: vec![Annotation {
+                        items: vec![Annotation {
                             kind: AnnotationKind::In,
                             span: span(15, 17),
                         }],
@@ -415,7 +510,7 @@ interface IUnknown
                         is_const: false,
                     },
                     annotations: Some(Annotations {
-                        inner: vec![
+                        items: vec![
                             Annotation {
                                 kind: AnnotationKind::Out,
                                 span: span(33, 36),
@@ -481,7 +576,7 @@ interface IUnknown
             name: "IUnknown".to_string(),
             base: None,
             annotations: vec![Annotations {
-                inner: vec![
+                items: vec![
                     Annotation {
                         kind: AnnotationKind::Local,
                         span: span(7, 12),
@@ -524,7 +619,7 @@ interface IUnknown
                                 is_const: false,
                             },
                             annotations: Some(Annotations {
-                                inner: vec![Annotation {
+                                items: vec![Annotation {
                                     kind: AnnotationKind::In,
                                     span: span(154, 156),
                                 }],
@@ -542,7 +637,7 @@ interface IUnknown
                                 is_const: false,
                             },
                             annotations: Some(Annotations {
-                                inner: vec![
+                                items: vec![
                                     Annotation {
                                         kind: AnnotationKind::Out,
                                         span: span(172, 175),

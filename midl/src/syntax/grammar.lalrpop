@@ -35,7 +35,7 @@ Argument: Argument = {
 };
 
 pub Annotations: Annotations = {
-    <l:@L> "[" <an:Comma<Annotation>> "]" <r:@R> => Annotations::new(an, span(l, r)),
+    <l:@L> "[" <items:Comma<Annotation>> "]" <r:@R> => Annotations { items, span: span(l, r) },
 };
 
 Annotation: Annotation = {
@@ -62,8 +62,14 @@ pub Comment: Comment = {
 };
 
 pub Type: Type = {
-    "unsigned" "long" => Type::UnsignedLong,
+    "char" => Type::Char,
+    "short" => Type::Short,
+    "int" => Type::Int,
     "long" => Type::Long,
+    "unsigned" "char" => Type::Unsigned(Box::new(Type::Char)),
+    "unsigned" "short" => Type::Unsigned(Box::new(Type::Short)),
+    "unsigned" "int" => Type::Unsigned(Box::new(Type::Int)),
+    "unsigned" "long" => Type::Unsigned(Box::new(Type::Long)),
     "void" => Type::Void,
     <ty:Type> "*" => Type::Ptr { inner: Box::new(ty), is_const: false },
     <identifier> => Type::Named(<>),
