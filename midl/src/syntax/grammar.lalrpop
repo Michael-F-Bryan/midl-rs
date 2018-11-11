@@ -1,6 +1,30 @@
-use crate::syntax::ast::{span, Quote, Type, Comment, Annotations, Annotation, AnnotationKind, FnDecl, Argument};
+use crate::syntax::ast::{
+    span, Quote, Type, Comment, Annotations, Annotation, AnnotationKind, 
+    FnDecl, Argument, Interface,
+};
 
 grammar;
+
+pub Interface: Interface = {
+    <l:@L> <ann:Annotations*> "interface" <name:identifier> <base:base_interface?> "{" 
+        <items:item*> 
+    "}" ";"? <r:@R> 
+    => Interface {
+        name: name.to_string(),
+        span: span(l, r),
+        annotations: ann,
+        base,
+        items,
+    }
+};
+
+item: FnDecl = {
+    <FnDecl> ";" => <>,
+};
+
+base_interface: String = {
+    ":" <base:identifier> => base.to_string(),
+};
 
 pub FnDecl: FnDecl = {
     <l:@L> <ret:Type> <name:identifier> "(" <args:Comma<Argument>> ")" <r:@R> => FnDecl::new(name, ret, args, span(l, r)),
@@ -25,6 +49,7 @@ AnnotationKind: AnnotationKind = {
     "out" => AnnotationKind::Out,
     "uuid" "(" <guid:r"[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}"> ")" => AnnotationKind::Uuid(guid.parse().unwrap()),
     <id:identifier> => AnnotationKind::Word(id),
+    <lit:string_literal> => AnnotationKind::StringLiteral(lit),
     <id:identifier> "(" <nested:Annotation> ")" => AnnotationKind::Nested(id, Box::new(nested)), 
 };
 

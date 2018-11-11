@@ -3,6 +3,7 @@ use failure_derive::Fail;
 use regex::Regex;
 use std::any::TypeId;
 use std::fmt::{self, Display, Formatter};
+use std::iter::{FromIterator, IntoIterator};
 use std::str::FromStr;
 
 pub(crate) fn span(l: usize, r: usize) -> ByteSpan {
@@ -85,7 +86,7 @@ macro_rules! impl_ast_node {
 }
 
 /// A set of zero or more [`Annotation`]s.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Annotations {
     pub inner: Vec<Annotation>,
     pub span: ByteSpan,
@@ -94,6 +95,61 @@ pub struct Annotations {
 impl Annotations {
     pub fn new(inner: Vec<Annotation>, span: ByteSpan) -> Annotations {
         Annotations { inner, span }
+    }
+}
+
+impl IntoIterator for Annotations {
+    type Item = Annotation;
+    type IntoIter = <Vec<Annotation> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Annotations {
+    type Item = &'a Annotation;
+    type IntoIter = <&'a [Annotation] as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter()
+    }
+}
+
+impl FromIterator<Annotation> for Annotations {
+    fn from_iter<I: IntoIterator<Item = Annotation>>(iter: I) -> Annotations {
+        let mut items = Vec::new();
+        let mut span = ByteSpan::default();
+
+        for item in iter {
+            span = if span == ByteSpan::default() {
+                item.span()
+            } else {
+                span.to(item.span())
+            };
+            items.push(item);
+        }
+
+        Annotations::new(items, span)
+    }
+}
+
+impl FromIterator<Annotations> for Annotations {
+    fn from_iter<I: IntoIterator<Item = Annotations>>(iter: I) -> Annotations {
+        let mut span = ByteSpan::default();
+        let items = iter
+            .into_iter()
+            .inspect(|ann| {
+                if span == Default::default() {
+                    span = ann.span();
+                } else {
+                    span = span.to(ann.span())
+                }
+            })
+            .flatten()
+            .collect();
+
+        Annotations::new(items, span)
     }
 }
 
@@ -120,6 +176,7 @@ pub enum AnnotationKind {
     Uuid(Guid),
     Nested(String, Box<Annotation>),
     Word(String),
+    StringLiteral(String),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -210,6 +267,15 @@ pub struct Argument {
     pub span: ByteSpan,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Interface {
+    pub name: String,
+    pub base: Option<String>,
+    pub annotations: Vec<Annotations>,
+    pub items: Vec<FnDecl>,
+    pub span: ByteSpan,
+}
+
 impl_ast_node!(Annotation);
 impl_ast_node!(Annotations);
 impl_ast_node!(Argument);
@@ -223,6 +289,7 @@ mod tests {
     use super::*;
     use crate::syntax::grammar::*;
 
+    // NOTE: We've hacked this so `const GUID * riid` is now `GUID * riid`.
     const IUNKNOWN: &str = r#"
 [
     local,
@@ -233,7 +300,7 @@ mod tests {
 ]
 interface IUnknown
 {
-    HRESULT QueryInterface([in] const GUID * riid, [out, iid_is(riid), annotation("__RPC__deref_out")] void **ppvObject);
+    HRESULT QueryInterface([in] GUID * riid, [out, iid_is(riid), annotation("__RPC__deref_out")] void **ppvObject);
     ULONG AddRef();
     ULONG Release();
 };
@@ -463,6 +530,130 @@ interface IUnknown
         let src = "00000000-0000-0000-C000-000000000046";
 
         let got = Guid::from_str(src).unwrap();
+
+        assert_eq!(got, should_be);
+    }
+
+    #[test]
+    fn parse_iunknown() {
+        let src = IUNKNOWN;
+        let should_be = Interface {
+            name: "IUnknown".to_string(),
+            base: None,
+            annotations: vec![Annotations {
+                inner: vec![
+                    Annotation {
+                        kind: AnnotationKind::Local,
+                        span: span(7, 12),
+                    },
+                    Annotation {
+                        kind: AnnotationKind::Object,
+                        span: span(18, 24),
+                    },
+                    Annotation {
+                        kind: AnnotationKind::Uuid(Guid {
+                            data1: 0,
+                            data2: 0,
+                            data3: 0,
+                            data4: [192, 0, 0, 0, 0, 0, 0, 70],
+                        }),
+                        span: span(30, 72),
+                    },
+                    Annotation {
+                        kind: AnnotationKind::Nested(
+                            "pointer_default".to_string(),
+                            Box::new(Annotation {
+                                kind: AnnotationKind::Word("unique".to_string()),
+                                span: span(95, 101),
+                            }),
+                        ),
+                        span: span(79, 102),
+                    },
+                ],
+                span: span(1, 104),
+            }],
+            items: vec![
+                FnDecl {
+                    name: "QueryInterface".to_string(),
+                    return_ty: Type::Named("HRESULT".to_string()),
+                    arguments: vec![
+                        Argument {
+                            name: "riid".to_string(),
+                            ty: Type::Ptr {
+                                inner: Box::new(Type::Named("GUID".to_string())),
+                                is_const: false,
+                            },
+                            annotations: Some(Annotations {
+                                inner: vec![Annotation {
+                                    kind: AnnotationKind::In,
+                                    span: span(154, 156),
+                                }],
+                                span: span(153, 157),
+                            }),
+                            span: span(153, 169),
+                        },
+                        Argument {
+                            name: "ppvObject".to_string(),
+                            ty: Type::Ptr {
+                                inner: Box::new(Type::Ptr {
+                                    inner: Box::new(Type::Void),
+                                    is_const: false,
+                                }),
+                                is_const: false,
+                            },
+                            annotations: Some(Annotations {
+                                inner: vec![
+                                    Annotation {
+                                        kind: AnnotationKind::Out,
+                                        span: span(172, 175),
+                                    },
+                                    Annotation {
+                                        kind: AnnotationKind::Nested(
+                                            "iid_is".to_string(),
+                                            Box::new(Annotation {
+                                                kind: AnnotationKind::Word("riid".to_string()),
+                                                span: span(184, 188),
+                                            }),
+                                        ),
+                                        span: span(177, 189),
+                                    },
+                                    Annotation {
+                                        kind: AnnotationKind::Nested(
+                                            "annotation".to_string(),
+                                            Box::new(Annotation {
+                                                kind: AnnotationKind::StringLiteral(
+                                                    "__RPC__deref_out".to_string(),
+                                                ),
+                                                span: span(202, 220),
+                                            }),
+                                        ),
+                                        span: span(191, 221),
+                                    },
+                                ],
+                                span: span(171, 222),
+                            }),
+                            span: span(171, 239),
+                        },
+                    ],
+                    span: span(130, 240),
+                },
+                FnDecl {
+                    name: "AddRef".to_string(),
+                    return_ty: Type::Named("ULONG".to_string()),
+                    arguments: vec![],
+                    span: span(246, 260),
+                },
+                FnDecl {
+                    name: "Release".to_string(),
+                    return_ty: Type::Named("ULONG".to_string()),
+                    arguments: vec![],
+                    span: span(266, 281),
+                },
+            ],
+            span: span(1, 285),
+        };
+
+        let got = InterfaceParser::new().parse(src).unwrap();
 
         assert_eq!(got, should_be);
     }
