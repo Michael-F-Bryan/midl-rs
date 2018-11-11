@@ -1,18 +1,35 @@
+use super::grammar;
+use super::visit_mut::{MapSpans, MutVisitor};
 use super::Guid;
-use codespan::{ByteIndex, ByteSpan};
+use codespan::{ByteIndex, ByteOffset, ByteSpan, FileMap};
 use lalrpop_util;
 use std::any::TypeId;
 use std::fmt::{self, Display, Formatter};
 use std::iter::{FromIterator, IntoIterator};
 
-/// Parse some raw source code into a [`File`].
-pub fn parse_raw<'input>(
-    src: &'input str,
-) -> Result<File, lalrpop_util::ParseError<ByteIndex, (ByteIndex, &'input str), &'static str>> {
-    super::grammar::FileParser::new().parse(src).map_err(|e| {
-        e.map_location(|loc| ByteIndex(loc as u32))
-            .map_token(|tok| (ByteIndex(tok.0 as u32), tok.1))
-    })
+/// Parse some source code into a [`File`].
+pub fn parse<'input>(src: &FileMap) -> ParseResult<File> {
+    let offset = ByteOffset(src.span().start().0 as i64);
+
+    let mut file = grammar::FileParser::new()
+        .parse(src.src())
+        .map_err(|e| map_err(e, offset))?;
+
+    MapSpans::new(|span| span.map(|ix| ix + offset)).visit_file_mut(&mut file);
+
+    Ok(file)
+}
+
+pub type ParseError<'input> =
+    lalrpop_util::ParseError<ByteIndex, (ByteIndex, &'input str), &'static str>;
+pub type ParseResult<'input, T = ()> = Result<T, ParseError<'input>>;
+
+fn map_err<'input>(
+    e: lalrpop_util::ParseError<usize, grammar::Token<'input>, &'static str>,
+    offset: ByteOffset,
+) -> ParseError<'input> {
+    e.map_location(|loc| ByteIndex(loc as u32) + offset)
+        .map_token(|tok| (ByteIndex(tok.0 as u32), tok.1))
 }
 
 pub(crate) fn span(l: usize, r: usize) -> ByteSpan {
@@ -53,24 +70,12 @@ pub struct Comment {
     pub span: ByteSpan,
 }
 
-impl Comment {
-    pub fn new(content: String, span: ByteSpan) -> Comment {
-        Comment { content, span }
-    }
-}
-
 /// Code which should be copied into the output file as-is. Corresponds to the
 /// `cpp_quote()` statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Quote {
     pub content: String,
     pub span: ByteSpan,
-}
-
-impl Quote {
-    pub fn new(content: String, span: ByteSpan) -> Quote {
-        Quote { content, span }
-    }
 }
 
 impl Display for Quote {
@@ -200,12 +205,6 @@ pub struct Annotation {
     pub span: ByteSpan,
 }
 
-impl Annotation {
-    pub fn new(kind: AnnotationKind, span: ByteSpan) -> Annotation {
-        Annotation { kind, span }
-    }
-}
-
 impl Display for Annotation {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         self.kind.fmt(f)
@@ -247,17 +246,6 @@ pub struct FnDecl {
     pub return_ty: Type,
     pub arguments: Vec<Argument>,
     pub span: ByteSpan,
-}
-
-impl FnDecl {
-    pub fn new(name: String, return_ty: Type, arguments: Vec<Argument>, span: ByteSpan) -> FnDecl {
-        FnDecl {
-            name,
-            return_ty,
-            arguments,
-            span,
-        }
-    }
 }
 
 impl Display for FnDecl {
@@ -340,7 +328,10 @@ mod tests {
     #[test]
     fn parse_cpp_quote() {
         let src = r##"cpp_quote("#include <oaidl.h>")"##;
-        let should_be = Quote::new("#include <oaidl.h>".to_string(), span(0, src.len()));
+        let should_be = Quote {
+            content: "#include <oaidl.h>".to_string(),
+            span: span(0, src.len()),
+        };
 
         let got = QuoteParser::new().parse(src).unwrap();
 
@@ -373,7 +364,10 @@ mod tests {
     #[test]
     fn comments() {
         let src = "// this is a comment";
-        let should_be = Comment::new("this is a comment".to_string(), span(0, src.len()));
+        let should_be = Comment {
+            content: "this is a comment".to_string(),
+            span: span(0, src.len()),
+        };
 
         let got = CommentParser::new().parse(src).unwrap();
         assert_eq!(got, should_be);
@@ -468,12 +462,12 @@ mod tests {
     #[test]
     fn basic_function_signature() {
         let src = "ULONG Release()";
-        let should_be = FnDecl::new(
-            "Release".to_string(),
-            Type::Named("ULONG".to_string()),
-            vec![],
-            span(0, src.len()),
-        );
+        let should_be = FnDecl {
+            name: "Release".to_string(),
+            return_ty: Type::Named("ULONG".to_string()),
+            arguments: vec![],
+            span: span(0, src.len()),
+        };
 
         let got = FnDeclParser::new().parse(src).unwrap();
 
