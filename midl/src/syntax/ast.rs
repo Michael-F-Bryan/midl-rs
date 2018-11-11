@@ -1,8 +1,19 @@
 use super::Guid;
 use codespan::{ByteIndex, ByteSpan};
+use lalrpop_util;
 use std::any::TypeId;
 use std::fmt::{self, Display, Formatter};
 use std::iter::{FromIterator, IntoIterator};
+
+/// Parse some raw source code into a [`File`].
+pub fn parse_raw<'input>(
+    src: &'input str,
+) -> Result<File, lalrpop_util::ParseError<ByteIndex, (ByteIndex, &'input str), &'static str>> {
+    super::grammar::FileParser::new().parse(src).map_err(|e| {
+        e.map_location(|loc| ByteIndex(loc as u32))
+            .map_token(|tok| (ByteIndex(tok.0 as u32), tok.1))
+    })
+}
 
 pub(crate) fn span(l: usize, r: usize) -> ByteSpan {
     ByteSpan::new(ByteIndex(l as u32), ByteIndex(r as u32))
@@ -16,6 +27,13 @@ pub trait AstNode: 'static {
     fn type_id(&self) -> TypeId {
         TypeId::of::<Self>()
     }
+}
+
+/// The contents of a single file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct File {
+    pub items: Vec<Item>,
+    pub span: ByteSpan,
 }
 
 sum_type::sum_type! {
@@ -308,6 +326,7 @@ impl_ast_node!(Annotation);
 impl_ast_node!(Annotations);
 impl_ast_node!(Argument);
 impl_ast_node!(Comment);
+impl_ast_node!(File);
 impl_ast_node!(FnDecl);
 impl_ast_node!(Interface);
 impl_ast_node!(Quote);
@@ -317,23 +336,6 @@ impl_ast_node!(Item; Comment | Quote | Interface);
 mod tests {
     use super::*;
     use crate::syntax::grammar::*;
-
-    // NOTE: We've hacked this so `const GUID * riid` is now `GUID * riid`.
-    const IUNKNOWN: &str = r#"
-[
-    local,
-    object,
-    uuid(00000000-0000-0000-C000-000000000046),
-
-    pointer_default(unique)
-]
-interface IUnknown
-{
-    HRESULT QueryInterface([in] GUID * riid, [out, iid_is(riid), annotation("__RPC__deref_out")] void **ppvObject);
-    ULONG AddRef();
-    ULONG Release();
-};
-    "#;
 
     #[test]
     fn parse_cpp_quote() {
@@ -571,7 +573,23 @@ interface IUnknown
 
     #[test]
     fn parse_iunknown() {
-        let src = IUNKNOWN;
+        // NOTE: We've hacked this so `const GUID * riid` is now `GUID * riid`.
+        let src = r#"
+[
+    local,
+    object,
+    uuid(00000000-0000-0000-C000-000000000046),
+
+    pointer_default(unique)
+]
+interface IUnknown
+{
+    HRESULT QueryInterface([in] GUID * riid, [out, iid_is(riid), annotation("__RPC__deref_out")] void **ppvObject);
+    ULONG AddRef();
+    ULONG Release();
+}
+    "#;
+
         let should_be = Interface {
             name: "IUnknown".to_string(),
             base: None,
@@ -685,7 +703,7 @@ interface IUnknown
                     span: span(266, 281),
                 },
             ],
-            span: span(1, 285),
+            span: span(1, 284),
         };
 
         let got = InterfaceParser::new().parse(src).unwrap();
