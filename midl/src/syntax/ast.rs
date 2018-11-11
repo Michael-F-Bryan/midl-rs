@@ -1,10 +1,7 @@
+use super::Guid;
 use codespan::{ByteIndex, ByteSpan};
-use failure_derive::Fail;
-use regex::Regex;
 use std::any::TypeId;
-use std::fmt::{self, Display, Formatter};
 use std::iter::{FromIterator, IntoIterator};
-use std::str::FromStr;
 
 pub(crate) fn span(l: usize, r: usize) -> ByteSpan {
     ByteSpan::new(ByteIndex(l as u32), ByteIndex(r as u32))
@@ -26,6 +23,7 @@ sum_type::sum_type! {
     pub enum Item {
         Quote,
         Comment,
+        Interface,
     }
 }
 
@@ -65,24 +63,6 @@ pub enum Type {
     ConstPtr(Box<Type>),
     Ptr { inner: Box<Type>, is_const: bool },
     Named(String),
-}
-
-macro_rules! impl_ast_node {
-    ($name:ty) => {
-        impl AstNode for $name {
-            fn span(&self) -> ByteSpan {
-                self.span
-            }
-        }
-    };
-    ($name:ident; $( $variant:ident )|*) => {
-        impl AstNode for $name {
-            fn span(&self) -> ByteSpan {
-                sum_type::defer!($name as *self; $($variant)|* => |ref item| <_ as AstNode>::span(item))
-            }
-        }
-
-    }
 }
 
 /// A set of zero or more [`Annotation`]s.
@@ -179,65 +159,6 @@ pub enum AnnotationKind {
     StringLiteral(String),
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Guid {
-    pub data1: u32,
-    pub data2: u16,
-    pub data3: u16,
-    pub data4: [u8; 8],
-}
-
-impl FromStr for Guid {
-    type Err = ParseGuidError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        lazy_static::lazy_static! {
-            static ref PATTERN: Regex = Regex::new(r"^([[:xdigit:]]{8})-([[:xdigit:]]{4})-([[:xdigit:]]{4})-([[:xdigit:]]{4})-([[:xdigit:]]{12})$").unwrap();
-        }
-
-        let got = PATTERN.captures(s).ok_or(ParseGuidError)?;
-
-        let first_u16 = u16::from_str_radix(&got[4], 16).unwrap();
-        let data4 = &got[5];
-        let data4 = [
-            (first_u16 >> 8) as u8,
-            (first_u16 & 0xFF) as u8,
-            u8::from_str_radix(&data4[0..2], 16).unwrap(),
-            u8::from_str_radix(&data4[2..4], 16).unwrap(),
-            u8::from_str_radix(&data4[4..6], 16).unwrap(),
-            u8::from_str_radix(&data4[6..8], 16).unwrap(),
-            u8::from_str_radix(&data4[8..10], 16).unwrap(),
-            u8::from_str_radix(&data4[10..12], 16).unwrap(),
-        ];
-
-        Ok(Guid {
-            data1: u32::from_str_radix(&got[1], 16).unwrap(),
-            data2: u16::from_str_radix(&got[2], 16).unwrap(),
-            data3: u16::from_str_radix(&got[3], 16).unwrap(),
-            data4,
-        })
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Fail)]
-#[fail(display = "Invalid GUID format")]
-pub struct ParseGuidError;
-
-impl Display for Guid {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{:08X}-{:04X}-{:04X}-{:02X}{:02X}-",
-            self.data1, self.data2, self.data3, self.data4[0], self.data4[1],
-        )?;
-        for byte in &self.data4[2..] {
-            write!(f, "{:02X}", byte)?;
-        }
-
-        Ok(())
-    }
-}
-
 /// A bare function signature.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnDecl {
@@ -267,6 +188,7 @@ pub struct Argument {
     pub span: ByteSpan,
 }
 
+/// A COM interface.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Interface {
     pub name: String,
@@ -276,13 +198,31 @@ pub struct Interface {
     pub span: ByteSpan,
 }
 
+macro_rules! impl_ast_node {
+    ($name:ty) => {
+        impl AstNode for $name {
+            fn span(&self) -> ByteSpan {
+                self.span
+            }
+        }
+    };
+    ($name:ident; $( $variant:ident )|*) => {
+        impl AstNode for $name {
+            fn span(&self) -> ByteSpan {
+                sum_type::defer!($name as *self; $($variant)|* => |ref item| <_ as AstNode>::span(item))
+            }
+        }
+    }
+}
+
 impl_ast_node!(Annotation);
 impl_ast_node!(Annotations);
 impl_ast_node!(Argument);
-impl_ast_node!(FnDecl);
 impl_ast_node!(Comment);
+impl_ast_node!(FnDecl);
+impl_ast_node!(Interface);
 impl_ast_node!(Quote);
-impl_ast_node!(Item; Comment | Quote);
+impl_ast_node!(Item; Comment | Quote | Interface);
 
 #[cfg(test)]
 mod tests {
@@ -529,7 +469,7 @@ interface IUnknown
         };
         let src = "00000000-0000-0000-C000-000000000046";
 
-        let got = Guid::from_str(src).unwrap();
+        let got: Guid = src.parse().unwrap();
 
         assert_eq!(got, should_be);
     }
