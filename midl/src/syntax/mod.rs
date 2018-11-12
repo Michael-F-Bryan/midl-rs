@@ -6,6 +6,6 @@ pub mod parser;
 pub mod visit_mut;
 lalrpop_util::lalrpop_mod!(grammar, "/syntax/grammar.rs");
 
-pub use self::guid::Guid;
+pub use self::guid::{Guid, ParseGuidError};
 pub use self::parser::Parser;
 pub use self::visit_mut::MutVisitor;

@@ -8,7 +8,8 @@ edition = "2018"
 [dependencies]
 lalrpop-util = "0.16.1"
 regex = "0.2.0"
-codespan = "0.2.0"
+#codespan = "0.2.0"
+codespan = { git = "https://github.com/brendanzab/codespan" }
 # sum_type = "0.1.0"
 sum_type = { git = "https://github.com/Michael-F-Bryan/sum_type" }
 failure = "0.1.3"

@@ -60,6 +60,7 @@ sum_type::sum_type! {
         Quote,
         Comment,
         Interface,
+        Imports,
     }
 }
 
@@ -67,6 +68,13 @@ sum_type::sum_type! {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Comment {
     pub content: String,
+    pub span: ByteSpan,
+}
+
+/// One or more file imports.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Imports {
+    pub names: Vec<String>,
     pub span: ByteSpan,
 }
 
@@ -701,6 +709,24 @@ interface IUnknown
         };
 
         let got = InterfaceParser::new().parse(src).unwrap();
+
+        assert_eq!(got, should_be);
+    }
+
+    #[test]
+    fn file_imports() {
+        let src = r#"import "part1.idl", "part2.idl", "part3.idl""#;
+        let should_be = Imports {
+            names: vec![
+                String::from("part1.idl"),
+                String::from("part2.idl"),
+                String::from("part3.idl"),
+            ],
+            span: span(0, src.len()),
+        };
+        let should_be = Item::Imports(should_be);
+
+        let got = ItemParser::new().parse(src).unwrap();
 
         assert_eq!(got, should_be);
     }

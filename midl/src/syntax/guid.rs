@@ -44,6 +44,7 @@ impl FromStr for Guid {
     }
 }
 
+/// GUID parsing failed.
 #[derive(Debug, Copy, Clone, PartialEq, Fail)]
 #[fail(display = "Invalid GUID format")]
 pub struct ParseGuidError;

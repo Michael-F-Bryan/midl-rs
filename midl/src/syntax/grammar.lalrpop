@@ -1,20 +1,25 @@
 use crate::syntax::ast::{
     span, Argument, Annotations, Annotation, AnnotationKind, Comment, 
-    File, FnDecl, Item, Interface, Quote, Type, 
+    File, FnDecl, Item, Imports, Interface, Quote, Type, 
 };
 
 grammar;
 
-pub(crate) File: File = {
-    <l:@L> <items:item*> <r:@R> => File { items, span: span(l, r) }
+pub File: File = {
+    <l:@L> <items:Item*> <r:@R> => File { items, span: span(l, r) }
 };
 
-item: Item = {
+pub Item: Item = {
     <Comment> => Item::Comment(<>),
     <Interface> ";"? => Item::Interface(<>),
+    <imports> ";"? => Item::Imports(<>),
 };
 
-pub(crate) Interface: Interface = {
+imports: Imports = {
+    <l:@L> "import" <names:Comma<string_literal>> <r:@R> => Imports { names, span: span(l, r) },
+};
+
+pub Interface: Interface = {
     <l:@L> <ann:Annotations*> "interface" <name:identifier> <base:base_interface?> "{" 
         <items:interface_item*> 
     "}" <r:@R> 
@@ -35,7 +40,7 @@ base_interface: String = {
     ":" <base:identifier> => base.to_string(),
 };
 
-pub(crate) FnDecl: FnDecl = {
+pub FnDecl: FnDecl = {
     <l:@L> <return_ty:Type> <name:identifier> "(" <arguments:Comma<Argument>> ")" <r:@R> => FnDecl {name, return_ty, arguments, span: span(l, r) },
 };
 
@@ -43,7 +48,7 @@ Argument: Argument = {
     <l:@L> <ann:Annotations?> <ty:Type> <name:identifier> <r:@R> => Argument {name, ty, annotations: ann, span: span(l, r) },
 };
 
-pub(crate) Annotations: Annotations = {
+pub Annotations: Annotations = {
     <l:@L> "[" <items:Comma<Annotation>> "]" <r:@R> => Annotations { items, span: span(l, r) },
 };
 
@@ -62,15 +67,15 @@ AnnotationKind: AnnotationKind = {
     <id:identifier> "(" <nested:Annotation> ")" => AnnotationKind::Nested(id, Box::new(nested)), 
 };
 
-pub(crate) Quote: Quote = {
+pub Quote: Quote = {
     <l:@L> "cpp_quote" "(" <s:string_literal> ")" <r:@R> => Quote { content: s, span: span(l, r) }
 };
 
-pub(crate) Comment: Comment = {
+pub Comment: Comment = {
     <l:@L> <s:r"//*[^\n]*"> <r:@R> => Comment { content: s[2..].trim_left().to_string(), span: span(l, r) }
 };
 
-pub(crate) Type: Type = {
+pub Type: Type = {
     "char" => Type::Char,
     "short" => Type::Short,
     "int" => Type::Int,

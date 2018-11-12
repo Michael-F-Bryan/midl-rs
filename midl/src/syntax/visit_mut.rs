@@ -1,8 +1,9 @@
 use super::ast::{
-    Annotation, Annotations, Argument, Comment, File, FnDecl, Interface, Item, Quote,
+    Annotation, Annotations, Argument, Comment, File, FnDecl, Imports, Interface, Item, Quote,
 };
 use codespan::ByteSpan;
 
+/// Mutably visit an AST node.
 pub trait MutVisitor {
     fn visit_file_mut(&mut self, file: &mut File) {
         visit_file_mut(self, file);
@@ -18,6 +19,10 @@ pub trait MutVisitor {
 
     fn visit_interface_mut(&mut self, interface: &mut Interface) {
         visit_interface_mut(self, interface);
+    }
+
+    fn visit_imports_mut(&mut self, imports: &mut Imports) {
+        visit_imports_mut(self, imports);
     }
 
     fn visit_quote_mut(&mut self, quote: &mut Quote) {
@@ -52,6 +57,7 @@ fn visit_item_mut<V: MutVisitor + ?Sized>(visitor: &mut V, item: &mut Item) {
         Item::Quote(ref mut quote) => visitor.visit_quote_mut(quote),
         Item::Interface(ref mut interface) => visitor.visit_interface_mut(interface),
         Item::Comment(ref mut comment) => visitor.visit_comment_mut(comment),
+        Item::Imports(ref mut imports) => visitor.visit_imports_mut(imports),
     }
 }
 
@@ -68,6 +74,8 @@ fn visit_interface_mut<V: MutVisitor + ?Sized>(visitor: &mut V, interface: &mut 
 }
 
 fn visit_comment_mut<V: MutVisitor + ?Sized>(visitor: &mut V, comment: &mut Comment) {}
+
+fn visit_imports_mut<V: MutVisitor + ?Sized>(visitor: &mut V, imports: &mut Imports) {}
 
 fn visit_annotations_mut<V: MutVisitor + ?Sized>(visitor: &mut V, annotations: &mut Annotations) {
     for item in &mut annotations.items {
@@ -116,6 +124,11 @@ impl<F: FnMut(ByteSpan) -> ByteSpan> MutVisitor for MapSpans<F> {
         visit_interface_mut(self, interface);
     }
 
+    fn visit_imports_mut(&mut self, imports: &mut Imports) {
+        imports.span = (self.map)(imports.span);
+        visit_imports_mut(self, imports);
+    }
+
     fn visit_quote_mut(&mut self, quote: &mut Quote) {
         quote.span = (self.map)(quote.span);
         visit_quote_mut(self, quote);
@@ -140,5 +153,4 @@ impl<F: FnMut(ByteSpan) -> ByteSpan> MutVisitor for MapSpans<F> {
         annotation.span = (self.map)(annotation.span);
         visit_annotation_mut(self, annotation);
     }
-
 }
