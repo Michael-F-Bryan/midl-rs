@@ -61,8 +61,6 @@ fn visit_item_mut<V: MutVisitor + ?Sized>(visitor: &mut V, item: &mut Item) {
     }
 }
 
-fn visit_quote_mut<V: MutVisitor + ?Sized>(visitor: &mut V, quote: &mut Quote) {}
-
 fn visit_interface_mut<V: MutVisitor + ?Sized>(visitor: &mut V, interface: &mut Interface) {
     for annotations in &mut interface.annotations {
         visitor.visit_annotations_mut(annotations);
@@ -73,17 +71,11 @@ fn visit_interface_mut<V: MutVisitor + ?Sized>(visitor: &mut V, interface: &mut 
     }
 }
 
-fn visit_comment_mut<V: MutVisitor + ?Sized>(visitor: &mut V, comment: &mut Comment) {}
-
-fn visit_imports_mut<V: MutVisitor + ?Sized>(visitor: &mut V, imports: &mut Imports) {}
-
 fn visit_annotations_mut<V: MutVisitor + ?Sized>(visitor: &mut V, annotations: &mut Annotations) {
     for item in &mut annotations.items {
         visitor.visit_annotation_mut(item);
     }
 }
-
-fn visit_annotation_mut<V: MutVisitor + ?Sized>(visitor: &mut V, annotation: &mut Annotation) {}
 
 fn visit_fn_decl_mut<V: MutVisitor + ?Sized>(visitor: &mut V, decl: &mut FnDecl) {
     for arg in &mut decl.arguments {
@@ -91,7 +83,11 @@ fn visit_fn_decl_mut<V: MutVisitor + ?Sized>(visitor: &mut V, decl: &mut FnDecl)
     }
 }
 
-fn visit_function_argument_mut<V: MutVisitor + ?Sized>(visitor: &mut V, arg: &mut Argument) {}
+fn visit_annotation_mut<V: MutVisitor + ?Sized>(_visitor: &mut V, _annotation: &mut Annotation) {}
+fn visit_function_argument_mut<V: MutVisitor + ?Sized>(_visitor: &mut V, _arg: &mut Argument) {}
+fn visit_comment_mut<V: MutVisitor + ?Sized>(_visitor: &mut V, _comment: &mut Comment) {}
+fn visit_imports_mut<V: MutVisitor + ?Sized>(_visitor: &mut V, _imports: &mut Imports) {}
+fn visit_quote_mut<V: MutVisitor + ?Sized>(_visitor: &mut V, _quote: &mut Quote) {}
 
 /// Apply a transformation to every [`ByteSpan`] in the AST.
 pub struct MapSpans<F> {
